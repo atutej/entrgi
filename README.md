@@ -1,9 +1,10 @@
 # EntRGi: Entropy Aware Reward Guidance for Diffusion Language Models
 
 <p align="center">
-  <a href="https://atutej.github.io/entrgi/">Project Page</a> •
-  <a href="#">Paper (arXiv)</a> •
-  <a href="#">Demo</a>
+  <a href="https://atutej.github.io/entrgi/"><img src="https://img.shields.io/badge/Project-Page-green" alt="Project Page"></a>
+  <a href="#"><img src="https://img.shields.io/badge/ArXiv-Preprint-red" alt="ArXiv"></a>
+  <a href="#"><img src="https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Demo-orange" alt="Hugging Face Demo"></a>
+  <a href="https://github.com/atutej/entrgi"><img src="https://img.shields.io/github/stars/atutej/entrgi?style=social" alt="GitHub Stars"></a>
 </p>
 
 <p align="center">
