@@ -7,7 +7,7 @@
 </p>
 
 <p align="center">
-  <img src="images/method.png" alt="EntRGi Method Overview" width="800">
+  <img src="assets/method.png" alt="EntRGi Method Overview" width="800">
 </p>
 
 ## Overview
@@ -17,7 +17,7 @@
 ### Key Features
 
 - **Entropy-aware interpolation**: Automatically adjusts the soft-hard embedding mix based on model confidence
-- **Inference-time steering**: No fine-tuning required—works with any pre-trained diffusion LM
+- **Inference-time steering**: No fine-tuning required, can directly be applied on a dLLM
 - **Reward model agnostic**: Compatible with standard autoregressive reward models
 - **Improved generation rewards**: Achieves higher rewards while maintaining text coherence
 
@@ -90,7 +90,7 @@ python entrgi.py \
     --output_file results/expectation_results.json
 ```
 
-### Multi-GPU Training
+### Multi-GPU Inference
 
 ```bash
 # Run with 4 GPUs using torchrun

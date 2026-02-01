@@ -380,19 +380,30 @@
     <section id="method">
         <div class="container">
             <h2>Method</h2>
+
             <p>
-                EntRGi interpolates between soft embeddings and hard tokens based on entropy: lower entropy emphasizes continuous relaxation for gradient accuracy, while higher entropy relies on hard tokens via STE for reward model reliability. This adaptive weighting resolves the fundamental tension in gradient-based steering of discrete diffusion models.
+            EntRGi interpolates between soft embeddings and hard tokens based on entropy: 
+            lower entropy emphasizes continuous relaxation for gradient accuracy, while higher 
+            entropy relies on hard tokens via STE for reward model reliability. This adaptive 
+            weighting resolves the fundamental tension in gradient-based steering of discrete 
+            diffusion models.
             </p>
-            <div class="figure">
-                <div class="figure-placeholder">
-                    Figure 1: Method overview
-                </div>
-                <p class="figure-caption">
-                    <strong>Figure 1.</strong> Overall pipeline of Entropy-aware Reward Guidance (EntRGi). The embeddings provided to the reward model at masked positions are constructed as an entropy-weighted interpolation between a continuous relaxation and sampled hard token embeddings.
-                </p>
-            </div>
+
+            <figure class="figure">
+            <img 
+                src="assets/method.png" 
+                alt="Overview of EntRGi pipeline showing entropy-weighted interpolation between soft and hard embeddings"
+                class="figure-img"
+            >
+            <figcaption class="figure-caption">
+                <strong>Figure 1.</strong> Overall pipeline of Entropy-aware Reward Guidance (EntRGi). 
+                The embeddings provided to the reward model at masked positions are constructed as 
+                an entropy-weighted interpolation between a continuous relaxation and sampled hard 
+                token embeddings.
+            </figcaption>
+            </figure>
         </div>
-    </section>
+        </section>
 
     <section id="examples">
         <div class="container">
