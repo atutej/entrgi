@@ -7,6 +7,10 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,wght@0,400;0,600;1,400&family=Source+Sans+3:wght@400;600&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet">
+    <script>
+        MathJax = { tex: { inlineMath: [['$','$']], displayMath: [['$$','$$']] } };
+    </script>
+    <script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
     <style>
         :root {
             --bg: #ffffff;
@@ -174,33 +178,31 @@
             line-height: 1.6;
         }
 
+        .figure-img {
+            width: 100%;
+            height: auto;
+            display: block;
+        }
+
         /* Examples */
-        .examples-grid {
-            display: grid;
-            grid-template-columns: repeat(2, 1fr);
-            gap: 20px;
-            margin-top: 24px;
+        .container-wide {
+            max-width: 1100px;
         }
 
-        .example-card {
+        .example-item {
+            margin-bottom: 28px;
+        }
+
+        .example-item:last-child {
+            margin-bottom: 0;
+        }
+
+        .example-gif {
+            width: 100%;
+            height: auto;
+            display: block;
             border: 1px solid var(--border);
-        }
-
-        .example-placeholder {
-            background: var(--code-bg);
-            height: 160px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: var(--text-muted);
-            font-size: 13px;
-        }
-
-        .example-caption {
-            padding: 12px;
-            font-size: 14px;
-            color: var(--text-secondary);
-            border-top: 1px solid var(--border);
+            border-radius: 4px;
         }
 
         /* Results */
@@ -382,11 +384,21 @@
             <h2>Method</h2>
 
             <p>
-            EntRGi interpolates between soft embeddings and hard tokens based on entropy: 
-            lower entropy emphasizes continuous relaxation for gradient accuracy, while higher 
-            entropy relies on hard tokens via STE for reward model reliability. This adaptive 
-            weighting resolves the fundamental tension in gradient-based steering of discrete 
+            EntRGi interpolates between soft embeddings and hard tokens based on entropy:
+            lower entropy emphasizes continuous relaxation for gradient accuracy, while higher
+            entropy relies on hard tokens via STE for reward model reliability. This adaptive
+            weighting resolves the fundamental tension in gradient-based steering of discrete
             diffusion models.
+            </p>
+
+            <p>
+            Concretely, at each masked position $l$, the input to the reward model is constructed as:
+            $$\hat{e}^l \;=\; \tilde{e}^l \;+\; \text{sg}\!\Big(w^l\,(\bar{e}^l - \tilde{e}^l)\Big)$$
+            where $\tilde{e}^l = \sum_i q_i^l\, \mathbf{E}^R_i$ is the soft embedding (continuous relaxation),
+            $\bar{e}^l = \mathbf{E}^R[x^l]$ is the sampled hard token embedding, and
+            $w^l = H(\mathbf{q}^l)/\log K$ normalizes the entropy coefficient $w^l$ to $[0,1]$.
+            When the model is confident ($w \!\approx\! 0$), the input reduces to the soft embedding, preserving gradient accuracy.
+            When uncertain ($w \!\approx\! 1$), it reverts to STE, ensuring the reward model receives realistic discrete tokens.
             </p>
 
             <figure class="figure">
@@ -405,55 +417,62 @@
         </div>
         </section>
 
-    <section id="examples">
-        <div class="container">
-            <h2>Examples</h2>
-            <p>
-                Qualitative comparisons showing outputs from the baseline dLLM versus EntRGi-guided generation.
-            </p>
-            <div class="examples-grid">
-                <div class="example-card">
-                    <div class="example-placeholder">Example 1</div>
-                    <div class="example-caption">Baseline output</div>
-                </div>
-                <div class="example-card">
-                    <div class="example-placeholder">Example 1</div>
-                    <div class="example-caption">EntRGi output</div>
-                </div>
-                <div class="example-card">
-                    <div class="example-placeholder">Example 2</div>
-                    <div class="example-caption">Baseline output</div>
-                </div>
-                <div class="example-card">
-                    <div class="example-placeholder">Example 2</div>
-                    <div class="example-caption">EntRGi output</div>
-                </div>
-            </div>
-        </div>
-    </section>
-
     <section id="results">
         <div class="container">
             <h2>Results</h2>
             <p>
-                EntRGi evaluated on Dream-v0-Instruct-7B with Skywork-Reward-v2-Qwen3-1.7B at τ=0.7.
+                Evaluated on Dream-v0-Instruct-7B with Skywork-Reward-v2-Qwen3-1.7B.
             </p>
             <div class="results-grid">
                 <div class="result-card">
                     <div class="benchmark">Reward-Bench-2</div>
                     <div class="score">3.91</div>
-                    <div class="comparison">+31% vs BoN baseline</div>
+                    <div class="comparison">BoN: 2.99</div>
                 </div>
                 <div class="result-card">
                     <div class="benchmark">JudgeBench</div>
                     <div class="score">2.44</div>
-                    <div class="comparison">+48% vs BoN baseline</div>
+                    <div class="comparison">BoN: 1.65</div>
                 </div>
                 <div class="result-card">
                     <div class="benchmark">RM-Bench</div>
                     <div class="score">5.70</div>
-                    <div class="comparison">+12% vs BoN baseline</div>
+                    <div class="comparison">BoN: 5.11</div>
                 </div>
+            </div>
+        </div>
+    </section>
+
+    <section id="examples">
+        <div class="container container-wide">
+            <h2>Examples</h2>
+            <p>
+                Each animation shows the same prompt processed with standard sampling (Base, top) and EntRGi-guided
+                generation (bottom), highlighting differences in token selection order and final output quality.
+            </p>
+
+            <div class="example-item">
+                <img src="assets/base_vs_entrgi_complete_this_story_the_map_was_more_ac.gif"
+                     alt="Base vs EntRGi generation: The map was more accurate than expected"
+                     class="example-gif">
+            </div>
+
+            <div class="example-item">
+                <img src="assets/base_vs_entrgi_what_if_cats_ruled_the_world_describe_a.gif"
+                     alt="Base vs EntRGi generation: What if cats ruled the world?"
+                     class="example-gif">
+            </div>
+
+            <div class="example-item">
+                <img src="assets/base_vs_entrgi_explain_why_the_sky_is_blue_to_a_5_year.gif"
+                     alt="Base vs EntRGi generation: Explain why the sky is blue to a 5-year-old"
+                     class="example-gif">
+            </div>
+
+            <div class="example-item">
+                <img src="assets/base_vs_entrgi_complete_this_story_the_last_human_on_e.gif"
+                     alt="Base vs EntRGi generation: The last human on Earth heard a knock"
+                     class="example-gif">
             </div>
         </div>
     </section>
@@ -468,6 +487,7 @@
                     </svg>
                     Copy
                 </button>
+                
 <pre id="bibtex">@article{tejaswi2026entrgi,
   title   = {EntRGi: Entropy Aware Reward Guidance for Diffusion Language Models},
   author  = {Tejaswi, Atula and Rout, Litu and Caramanis, Constantine and 
@@ -481,7 +501,7 @@
 
     <footer>
         <div class="container">
-            <a href="https://www.cs.utexas.edu/">UT Austin CS</a> · Template inspired by <a href="https://nerfies.github.io/">Nerfies</a>
+            <a href="https://www.cs.utexas.edu/">UT Austin CS</a> · <a href="https://www.ece.utexas.edu/">UT Austin ECE</a> · Template inspired by <a href="https://nerfies.github.io/">Nerfies</a>
         </div>
     </footer>
 
