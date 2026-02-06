@@ -2,7 +2,7 @@
 
 <p align="center">
   <a href="https://atutej.github.io/entrgi/"><img src="https://img.shields.io/badge/Project-Page-green" alt="Project Page"></a>
-  <a href="#"><img src="https://img.shields.io/badge/ArXiv-Preprint-red" alt="ArXiv"></a>
+  <a href="https://arxiv.org/abs/2602.05000"><img src="https://img.shields.io/badge/ArXiv-Preprint-red" alt="ArXiv"></a>
   <a href="https://github.com/atutej/entrgi"><img src="https://img.shields.io/github/stars/atutej/entrgi?style=social" alt="GitHub Stars"></a>
 </p>
 
@@ -198,7 +198,7 @@ entrgi/
   title   = {EntRGi: Entropy Aware Reward Guidance for Diffusion Language Models},
   author  = {Tejaswi, Atula and Rout, Litu and Caramanis, Constantine and 
              Shakkottai, Sanjay and Sanghavi, Sujay},
-  journal = {arXiv preprint arXiv:XXXX.XXXXX},
+  journal = {arXiv preprint arXiv:2602.05000},
   year    = {2026}
 }
 ```
@@ -210,7 +210,3 @@ This work builds on:
 - [Dream](https://github.com/Dream-org/Dream) - Discrete diffusion language model
 - [Skywork-Reward](https://huggingface.co/Skywork) - Reward models
 - [LMUnit](https://huggingface.co/ContextualAI/LMUnit-qwen2.5-72b) - Evaluation model
-
-## License
-
-MIT
