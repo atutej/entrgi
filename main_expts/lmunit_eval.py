@@ -89,6 +89,7 @@ class LMUnitEvaluator:
         self.model = LMUnit(
             model_path=model_path,
             tp_size=tp_size,
+            gpu_memory_utilization=0.8,  # Adjust as needed
         )
         
         # Sampling params as per the HuggingFace example
@@ -305,7 +306,7 @@ Examples:
     evaluator = LMUnitEvaluator(
         model_path=args.model,
         tp_size=args.tp_size,
-        debug=args.debug,
+        debug=args.debug
     )
     
     # Run evaluation

@@ -8,6 +8,7 @@ __pycache__/
 
 results*/
 results_*
+data
 *results
 *.txt
 *.out
