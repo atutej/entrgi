@@ -62,6 +62,10 @@ class EntrgiOnlineSFTConfig(DiffuGRPOConfig):
         default=0.1,
         metadata={"help": "Temperature β for softmax reward weighting: w_k = softmax(r_k/β)."},
     )
+    rwr_mode: str = field(
+        default="soft",
+        metadata={"help": "RWR weighting mode: 'soft' (softmax), 'hard' (best-of-K), 'uniform' (no weighting)."},
+    )
     guidance_reward_model: str = field(
         default="Skywork/Skywork-Reward-V2-Qwen3-0.6B",
         metadata={"help": "Reward model used for EntRGi gradient guidance during generation."},
@@ -69,6 +73,16 @@ class EntrgiOnlineSFTConfig(DiffuGRPOConfig):
     aps: bool = field(
         default=False,
         metadata={"help": "APS ablation: set entropy_weight=1 (full STE, no entropy-aware interpolation)."},
+    )
+    log_prob_mode: str = field(
+        default="full_mask",
+        metadata={
+            "help": (
+                "Log-prob estimator for the SFT loss. "
+                "'full_mask': completion always fully masked (d1 / Zhao et al.). "
+                "'elbo': completion masked with random rate ~ U[0,1], prompt unmasked (standard masked-diffusion ELBO)."
+            )
+        },
     )
 
 
@@ -313,10 +327,19 @@ class EntrgiOnlineSFTTrainer(DreamGRPOTrainer):
             rewards_per_func * self.reward_weights.to(device).unsqueeze(0)
         ).nansum(dim=1)
 
-        # ---- RWR weights (softmax within each group of num_generations) ----
-        rwr_temperature = self.args.rwr_temperature
+        # ---- RWR weights within each group of K completions ----
         rewards_grouped = rewards.view(-1, self.num_generations)  # [B, K]
-        rwr_weights = F.softmax(rewards_grouped / rwr_temperature, dim=1).view(-1)  # [N]
+        mode = self.args.rwr_mode
+        if mode == "soft":
+            rwr_weights = F.softmax(rewards_grouped / self.args.rwr_temperature, dim=1)
+        elif mode == "hard":
+            best = rewards_grouped.argmax(dim=1, keepdim=True)
+            rwr_weights = torch.zeros_like(rewards_grouped).scatter_(1, best, 1.0)
+        elif mode == "uniform":
+            rwr_weights = torch.full_like(rewards_grouped, 1.0 / self.num_generations)
+        else:
+            raise ValueError(f"Unknown rwr_mode {mode!r}. Choose 'soft', 'hard', or 'uniform'.")
+        rwr_weights = rwr_weights.view(-1)  # [N]
 
         # Compute group stats for logging (same as GRPO)
         mean_grouped_rewards = rewards_grouped.mean(dim=1)
@@ -388,6 +411,60 @@ class EntrgiOnlineSFTTrainer(DreamGRPOTrainer):
         }
 
     # ------------------------------------------------------------------
+    # ELBO log-prob estimator
+    # ------------------------------------------------------------------
+
+    def _get_per_token_logps_elbo(
+        self, model, input_ids, attention_mask, logits_to_keep
+    ):
+        """
+        Unbiased ELBO estimator of log p_θ(y | x).
+
+        For each sequence, samples mask_rate ~ U[0, 1] and masks each
+        completion token independently with that probability.  The prompt
+        is left unmasked.  Returns (per_token_logps, mask_rates) where
+        per_token_logps is nonzero only at masked-and-real positions.
+
+        The unbiased per-sequence estimate is:
+            sum(per_token_logps) / (mask_rate * |y|)
+        """
+        N = input_ids.size(0)
+        seq_len = input_ids.size(1)
+        prompt_length = seq_len - logits_to_keep
+        mask_id = self.processing_class.mask_token_id
+        device = input_ids.device
+
+        mask_rates = torch.rand(N, device=device).clamp(min=1e-6)  # [N]
+
+        # Mask completion tokens with per-sequence mask_rate; leave prompt intact
+        rand = torch.rand(N, logits_to_keep, device=device)
+        noise_mask = rand < mask_rates.unsqueeze(1)  # [N, L_completion]
+
+        noised_ids = input_ids.clone()
+        noised_ids[:, prompt_length:][noise_mask] = mask_id
+
+        pos_id = attention_mask.long().cumsum(-1) - 1
+        pos_id = pos_id.masked_fill(attention_mask == 0, 1)
+
+        logits = model(noised_ids, attention_mask=attention_mask, position_ids=pos_id).logits
+        logits = torch.cat([logits[:, :1], logits[:, :-1]], dim=1)  # right-shift
+
+        completion_logits = logits[:, -logits_to_keep:, :]
+        completion_targets = input_ids[:, -logits_to_keep:]
+        loss = F.cross_entropy(
+            completion_logits.reshape(-1, completion_logits.size(-1)),
+            completion_targets.reshape(-1),
+            reduction="none",
+        )
+        per_token_logps = -loss.view(N, logits_to_keep).float()
+
+        # Zero positions that were not masked or are padding
+        real_mask = attention_mask[:, -logits_to_keep:]
+        per_token_logps = per_token_logps * noise_mask.float() * real_mask.float()
+
+        return per_token_logps, mask_rates
+
+    # ------------------------------------------------------------------
     # Override: reward-weighted SFT loss
     # ------------------------------------------------------------------
 
@@ -418,14 +495,18 @@ class EntrgiOnlineSFTTrainer(DreamGRPOTrainer):
         attention_mask = torch.cat([prompt_mask, completion_mask], dim=1)
         logits_to_keep = completion_ids.size(1)
 
-        # Per-token log-probs under current Dream policy (right-shift + position_ids)
-        per_token_logps = self._get_per_token_logps(
-            model, input_ids, attention_mask, logits_to_keep
-        )  # [N, logits_to_keep]
-
-        # Length-normalized log-prob per sequence
         lengths = completion_mask.sum(1).clamp(min=1).float()
-        per_seq_logps = (per_token_logps * completion_mask).sum(1) / lengths  # [N]
+
+        if self.args.log_prob_mode == "elbo":
+            per_token_logps, mask_rates = self._get_per_token_logps_elbo(
+                model, input_ids, attention_mask, logits_to_keep
+            )
+            per_seq_logps = per_token_logps.sum(1) / (mask_rates * lengths)
+        else:
+            per_token_logps = self._get_per_token_logps(
+                model, input_ids, attention_mask, logits_to_keep
+            )
+            per_seq_logps = (per_token_logps * completion_mask).sum(1) / lengths
 
         # Weighted SFT loss
         loss = -(rwr_weights * per_seq_logps).sum()
