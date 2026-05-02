@@ -52,6 +52,10 @@ RewardFunc = Union[str, PreTrainedModel, Callable[[list, list], list[float]]]
 class EntrgiOnlineSFTConfig(DiffuGRPOConfig):
     """DiffuGRPOConfig + EntRGi-specific hyper-parameters."""
 
+    # Required for LoRA + gradient checkpointing + DDP: prevents reducer hooks
+    # firing twice during the gradient-checkpoint recompute pass.
+    ddp_find_unused_parameters: bool = field(default=False, metadata={"help": "Must be False for LoRA + grad-checkpoint + DDP."})
+
     M: int = field(default=1, metadata={"help": "Adam gradient steps per EntRGi guidance call."})
     apply_every_k: int = field(
         default=1,
