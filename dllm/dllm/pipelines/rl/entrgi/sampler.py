@@ -45,6 +45,10 @@ class EntrgiDreamSamplerConfig(DreamSamplerConfig):
     aps: bool = False
     """Ablation: always set entropy_weight = 1 (full STE, no entropy-aware interpolation)."""
 
+    deprioritize_eos: bool = True
+    """Set confidence = -inf at positions where the sampled token is EOS, preventing
+    early commitment of EOS and thus premature sequence termination."""
+
 
 @dataclass
 class EntrgiDreamSampler(BaseSampler):
@@ -178,20 +182,39 @@ class EntrgiDreamSampler(BaseSampler):
         eos_id = self.tokenizer.eos_token_id
         pad_id = getattr(self.tokenizer, "pad_token_id", None) or eos_id
 
+        embed_dtype = self.mapped_embeds.dtype
+
         for _ in range(config.M):
             optimizer.zero_grad()
 
-            all_response_embeds = torch.zeros(
-                B_total, response_len, embed_dim,
-                device=device, dtype=self.mapped_embeds.dtype,
-            )
             all_response_token_ids = x[:, max_prompt_len:].clone()
 
+            # Build per-sequence response embeddings without any in-place writes.
+            # In-place writes to a shared buffer cause PyTorch's version counter to
+            # increment after the grad-carrying assignment, making the saved tensor
+            # stale by backward time and silently killing the gradient to phi.
+            # index_put (no underscore = out-of-place) creates a fresh tensor each
+            # call, so the autograd graph is unambiguous.
+            seq_embed_list = []
             phi_idx = 0
             for p in range(B_total):
                 response_mask = mask_index[p][max_prompt_len:]
                 mask_pos = torch.where(response_mask)[0]
                 n_masks = len(mask_pos)
+                unmasked = ~response_mask
+
+                # Start from a detached base: unmasked token embeddings where
+                # available, zeros elsewhere.
+                seq_embed = torch.zeros(
+                    response_len, embed_dim, device=device, dtype=embed_dtype
+                )
+                if unmasked.any():
+                    unmasked_toks = x[p, max_prompt_len:][unmasked]
+                    unmasked_pos = torch.where(unmasked)[0]
+                    seq_embed = seq_embed.index_put(
+                        (unmasked_pos,),
+                        reward_embed_layer(self.token_mapping[unmasked_toks]).detach(),
+                    )
 
                 if n_masks > 0:
                     cur_phi = phi[phi_idx : phi_idx + n_masks]
@@ -213,8 +236,8 @@ class EntrgiDreamSampler(BaseSampler):
                         if config.aps
                         else (entropy / max_entropy).detach()
                     )
+                    #print(entropy_weight)
 
-                    embed_dtype = self.mapped_embeds.dtype
                     sample_logits = cur_phi / config.temperature
                     probs = F.softmax(sample_logits, dim=-1)
                     soft_embeds = torch.matmul(probs.to(embed_dtype), self.mapped_embeds)
@@ -226,23 +249,21 @@ class EntrgiDreamSampler(BaseSampler):
                     sample_probs = F.softmax(sample_logits.float(), dim=-1)
                     sampled_tokens = torch.multinomial(sample_probs, 1, replacement=True)
                     hard_embeds = self.mapped_embeds[sampled_tokens].mean(dim=1)
-                    # High entropy → more soft; low entropy → more hard
+                    # High entropy → more soft; low entropy → more hard (STE when aps=True)
                     soft_embeds = (
                         soft_embeds
                         + entropy_weight.to(embed_dtype).unsqueeze(-1) * (hard_embeds - soft_embeds).detach()
                     )
 
-                    all_response_embeds[p, mask_pos] = soft_embeds
+                    # Out-of-place scatter: returns a NEW tensor, preserving the
+                    # autograd graph from phi → probs → soft_embeds → seq_embed.
+                    seq_embed = seq_embed.index_put((mask_pos,), soft_embeds)
                     all_response_token_ids[p, mask_pos] = cur_phi.argmax(dim=-1)
                     phi_idx += n_masks
 
-                # Already-unmasked response tokens
-                unmasked = ~response_mask
-                if unmasked.any():
-                    unmasked_toks = x[p, max_prompt_len:][unmasked]
-                    all_response_embeds[p, unmasked] = reward_embed_layer(
-                        self.token_mapping[unmasked_toks]
-                    ).detach()
+                seq_embed_list.append(seq_embed)
+
+            all_response_embeds = torch.stack(seq_embed_list, dim=0)  # [B, L, D]
 
             total_len = max_prefix_len + response_len + max_suffix_len
             full_embeds = torch.cat(
@@ -431,6 +452,12 @@ class EntrgiDreamSampler(BaseSampler):
                 )
             else:
                 raise RuntimeError(f"Unknown alg: {alg!r}")
+
+            if config.deprioritize_eos:
+                eos_mask = x0 == eos_token_id
+                if eos_mask.any():
+                    confidence = confidence.clone()
+                    confidence[eos_mask] = -torch.inf
 
             full_confidence = torch.full(
                 (B_total, T), -torch.inf, device=device, dtype=torch.float32

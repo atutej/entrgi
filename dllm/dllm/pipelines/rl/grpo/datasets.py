@@ -8,7 +8,7 @@ with the RL pipeline, while example scripts stay thin.
 """
 
 import os
-from typing import Callable
+from typing import Callable, Optional
 
 from datasets import Dataset, load_dataset
 
@@ -219,12 +219,16 @@ SUPPORTED_DATASETS = ("gsm8k", "countdown", "sudoku", "math", "code", "wildchat"
 
 def get_dataset_and_rewards(
     dataset_name: str,
+    reward_model: Optional[str] = None,
 ) -> tuple[Dataset, list[Callable]]:
     """Return (dataset, reward_functions) for the given task name.
 
     Args:
         dataset_name: One of ``"gsm8k"``, ``"countdown"``, ``"sudoku"``,
-            ``"math"``, or ``"code"``.
+            ``"math"``, ``"code"``, or ``"wildchat"``.
+        reward_model: Override the reward model used for open-ended tasks
+            (wildchat).  Ignored for verifiable-reward tasks.  Defaults to
+            ``make_skywork_reward_func()``'s built-in default when ``None``.
 
     Returns:
         A ``(dataset, reward_functions)`` tuple ready to pass to
@@ -257,7 +261,11 @@ def get_dataset_and_rewards(
         reward_functions = [xmlcount_reward_func, coding_reward_func]
     elif dataset_name == "wildchat":
         dataset = get_wildchat_questions()
-        reward_functions = [make_skywork_reward_func()]
+        reward_functions = [
+            make_skywork_reward_func(reward_model)
+            if reward_model is not None
+            else make_skywork_reward_func()
+        ]
     else:
         raise ValueError(
             f"Unknown dataset: {dataset_name!r}. "
