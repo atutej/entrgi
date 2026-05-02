@@ -264,13 +264,20 @@ class EntrgiOnlineSFTTrainer(DreamGRPOTrainer):
             ):
                 self.sampler.model = unwrapped_model
                 prompt_completion_ids_all = []
+                ew_means = []
                 for i in range(0, prompt_ids.size(0), generation_batch_size):
                     batch = list(prompt_ids[i : i + generation_batch_size])
                     out = self.sampler.sample(batch, self.sampler_config)
                     prompt_completion_ids_all.append(out)
+                    if self.sampler._last_entropy_weight_mean is not None:
+                        ew_means.append(self.sampler._last_entropy_weight_mean)
                     torch.cuda.empty_cache()
 
         prompt_completion_ids = torch.cat(prompt_completion_ids_all, dim=0)
+        if ew_means:
+            self._metrics[mode]["guidance/entropy_weight"].append(
+                sum(ew_means) / len(ew_means)
+            )
 
         # Extract completion ids
         prompt_length = prompt_ids.size(1)

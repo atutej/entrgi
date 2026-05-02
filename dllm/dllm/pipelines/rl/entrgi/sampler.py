@@ -184,6 +184,8 @@ class EntrgiDreamSampler(BaseSampler):
 
         embed_dtype = self.mapped_embeds.dtype
 
+        ew_accum: list[torch.Tensor] = []
+
         for _ in range(config.M):
             optimizer.zero_grad()
 
@@ -236,7 +238,7 @@ class EntrgiDreamSampler(BaseSampler):
                         if config.aps
                         else (entropy / max_entropy).detach()
                     )
-                    #print(entropy_weight)
+                    ew_accum.append(entropy_weight.mean().item())
 
                     sample_logits = cur_phi / config.temperature
                     probs = F.softmax(sample_logits, dim=-1)
@@ -296,7 +298,8 @@ class EntrgiDreamSampler(BaseSampler):
             loss.backward()
             optimizer.step()
 
-        return phi.detach(), phi_init
+        ew_mean = sum(ew_accum) / len(ew_accum) if ew_accum else 1.0
+        return phi.detach(), phi_init, ew_mean
 
     # ------------------------------------------------------------------
     # Public: sample (mirrors DreamSampler.sample without @no_grad wrapper)
@@ -397,6 +400,7 @@ class EntrgiDreamSampler(BaseSampler):
             caches = None
 
         # Denoising loop
+        _ew_step_means: list[float] = []
         for step in range(effective_steps):
             mask_index = x == mask_token_id
 
@@ -411,7 +415,7 @@ class EntrgiDreamSampler(BaseSampler):
             # EntRGi guidance every apply_every_k steps
             use_guidance = guidance_active and (step % apply_every_k == 0)
             if use_guidance:
-                phi_opt, _ = self._optimize_logits(
+                phi_opt, _, ew_mean = self._optimize_logits(
                     logits,
                     mask_index,
                     x,
@@ -421,6 +425,7 @@ class EntrgiDreamSampler(BaseSampler):
                     config,
                     str(device),
                 )
+                _ew_step_means.append(ew_mean)
             else:
                 phi_opt = None
 
@@ -476,6 +481,10 @@ class EntrgiDreamSampler(BaseSampler):
                     x_ = torch.full_like(x, mask_token_id)
                     x_[mask_index] = x0.clone()
                     x[j, transfer_idx] = x_[j, transfer_idx]
+
+        self._last_entropy_weight_mean = (
+            sum(_ew_step_means) / len(_ew_step_means) if _ew_step_means else None
+        )
 
         if not return_dict:
             return x
