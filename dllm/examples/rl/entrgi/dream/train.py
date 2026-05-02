@@ -80,6 +80,16 @@ class TrainingArguments(EntrgiOnlineSFTConfig):
     )
     dream_top_p: float = field(default=0.95, metadata={"help": "top-p for Dream sampling."})
     dream_top_k: int = field(default=50, metadata={"help": "top-k for Dream sampling."})
+    deprioritize_eos: bool = field(
+        default=False,
+        metadata={
+            "help": (
+                "Deprioritize EOS during denoising (set confidence=-inf at EOS-sampled "
+                "positions). False during training so guidance can steer the model toward "
+                "completing responses within the token budget."
+            )
+        },
+    )
     reward_model: Optional[str] = field(
         default=None,
         metadata={
@@ -159,6 +169,7 @@ def train():
         reward_temperature=training_args.rwr_temperature,
         num_generations=training_args.num_generations,
         aps=training_args.aps,
+        deprioritize_eos=training_args.deprioritize_eos,
     )
 
     # ---- Trainer ----------------------------------------------------------------
