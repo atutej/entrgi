@@ -329,16 +329,16 @@ class EntrgiOnlineSFTTrainer(DreamGRPOTrainer):
 
         # ---- RWR weights within each group of K completions ----
         rewards_grouped = rewards.view(-1, self.num_generations)  # [B, K]
-        mode = self.args.rwr_mode
-        if mode == "soft":
+        rwr_mode = self.args.rwr_mode
+        if rwr_mode == "soft":
             rwr_weights = F.softmax(rewards_grouped / self.args.rwr_temperature, dim=1)
-        elif mode == "hard":
+        elif rwr_mode == "hard":
             best = rewards_grouped.argmax(dim=1, keepdim=True)
             rwr_weights = torch.zeros_like(rewards_grouped).scatter_(1, best, 1.0)
-        elif mode == "uniform":
+        elif rwr_mode == "uniform":
             rwr_weights = torch.full_like(rewards_grouped, 1.0 / self.num_generations)
         else:
-            raise ValueError(f"Unknown rwr_mode {mode!r}. Choose 'soft', 'hard', or 'uniform'.")
+            raise ValueError(f"Unknown rwr_mode {rwr_mode!r}. Choose 'soft', 'hard', or 'uniform'.")
         rwr_weights = rwr_weights.view(-1)  # [N]
 
         # Compute group stats for logging (same as GRPO)
