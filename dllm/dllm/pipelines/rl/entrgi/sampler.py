@@ -45,6 +45,9 @@ class EntrgiDreamSamplerConfig(DreamSamplerConfig):
     aps: bool = False
     """Ablation: always set entropy_weight = 1 (full STE, no entropy-aware interpolation)."""
 
+    soft_only: bool = False
+    """Ablation: always set entropy_weight = 0 (pure soft/continuous embeddings, no STE)."""
+
     deprioritize_eos: bool = True
     """Set confidence = -inf at positions where the sampled token is EOS, preventing
     early commitment of EOS and thus premature sequence termination."""
@@ -233,11 +236,12 @@ class EntrgiDreamSampler(BaseSampler):
                             dtype=entropy_probs.dtype,
                         )
                     )
-                    entropy_weight = (
-                        torch.ones_like(entropy)
-                        if config.aps
-                        else (entropy / max_entropy).detach()
-                    )
+                    if config.aps:
+                        entropy_weight = torch.ones_like(entropy)
+                    elif config.soft_only:
+                        entropy_weight = torch.zeros_like(entropy)
+                    else:
+                        entropy_weight = (entropy / max_entropy).detach()
                     ew_accum.append(entropy_weight.mean().item())
 
                     sample_logits = cur_phi / config.temperature

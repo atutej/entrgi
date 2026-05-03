@@ -78,6 +78,10 @@ class EntrgiOnlineSFTConfig(DiffuGRPOConfig):
         default=False,
         metadata={"help": "APS ablation: set entropy_weight=1 (full STE, no entropy-aware interpolation)."},
     )
+    soft_only: bool = field(
+        default=False,
+        metadata={"help": "Soft ablation: set entropy_weight=0 (pure continuous embeddings, no STE)."},
+    )
     log_prob_mode: str = field(
         default="full_mask",
         metadata={
@@ -138,7 +142,11 @@ class EntrgiOnlineSFTTrainer(DreamGRPOTrainer):
                 reward_temperature=args.rwr_temperature if args else 0.1,
                 num_generations=args.num_generations if args else 4,
                 aps=args.aps if args else False,
+                soft_only=args.soft_only if args else False,
             )
+
+        assert not (sampler_config.aps and sampler_config.soft_only), \
+            "aps and soft_only are mutually exclusive: aps sets entropy_weight=1, soft_only sets entropy_weight=0."
 
         # Placeholder sampler — will be replaced with guidance model below.
         from dllm.pipelines.dream.sampler import DreamSampler

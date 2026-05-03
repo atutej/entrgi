@@ -80,6 +80,10 @@ class TrainingArguments(EntrgiOnlineSFTConfig):
     )
     dream_top_p: float = field(default=0.95, metadata={"help": "top-p for Dream sampling."})
     dream_top_k: int = field(default=50, metadata={"help": "top-k for Dream sampling."})
+    soft_only: bool = field(
+        default=False,
+        metadata={"help": "Soft ablation: set entropy_weight=0 (pure continuous embeddings, no STE)."},
+    )
     deprioritize_eos: bool = field(
         default=False,
         metadata={
@@ -169,6 +173,7 @@ def train():
         reward_temperature=training_args.rwr_temperature,
         num_generations=training_args.num_generations,
         aps=training_args.aps,
+        soft_only=training_args.soft_only,
         deprioritize_eos=training_args.deprioritize_eos,
     )
 
