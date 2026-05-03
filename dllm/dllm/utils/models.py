@@ -60,6 +60,7 @@ def get_model(
         "quantization_config": quant_config,
         "attn_implementation": attn_implementation,
         "config": config,
+        "trust_remote_code": True,
     }
 
     try:
@@ -101,6 +102,7 @@ def get_tokenizer(
     tokenizer = transformers.AutoTokenizer.from_pretrained(
         model_name_or_path,
         padding_side="right",
+        trust_remote_code=True,
     )
 
     assert tokenizer.eos_token is not None or tokenizer.pad_token is not None
