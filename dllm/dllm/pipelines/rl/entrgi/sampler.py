@@ -48,6 +48,9 @@ class EntrgiDreamSamplerConfig(DreamSamplerConfig):
     soft_only: bool = False
     """Ablation: always set entropy_weight = 0 (pure soft/continuous embeddings, no STE)."""
 
+    use_position_ids: bool = True
+    """Compute and pass position_ids for left-padded sequences (Dream). Set False for LLaDA."""
+
     deprioritize_eos: bool = True
     """Set confidence = -inf at positions where the sampled token is EOS, preventing
     early commitment of EOS and thus premature sequence termination."""
@@ -181,7 +184,6 @@ class EntrgiDreamSampler(BaseSampler):
         batched_prefix = batched_prefix.repeat_interleave(K, dim=0)
         batched_suffix = batched_suffix.repeat_interleave(K, dim=0)
 
-        reward_embed_layer = self.reward_model.get_input_embeddings()
         eos_id = self.tokenizer.eos_token_id
         pad_id = getattr(self.tokenizer, "pad_token_id", None) or eos_id
 
@@ -218,7 +220,7 @@ class EntrgiDreamSampler(BaseSampler):
                     unmasked_pos = torch.where(unmasked)[0]
                     seq_embed = seq_embed.index_put(
                         (unmasked_pos,),
-                        reward_embed_layer(self.token_mapping[unmasked_toks]).detach(),
+                        self.mapped_embeds[unmasked_toks],
                     )
 
                 if n_masks > 0:
@@ -367,7 +369,7 @@ class EntrgiDreamSampler(BaseSampler):
             if L > 0:
                 attention_mask[j, -L:] = 1
 
-        if torch.any(attention_mask == 0):
+        if config.use_position_ids and torch.any(attention_mask == 0):
             pos_id = attention_mask.long().cumsum(-1) - 1
             pos_id.masked_fill_(attention_mask == 0, 1)
         else:
@@ -506,3 +508,26 @@ class EntrgiDreamSampler(BaseSampler):
 
         plain = DreamSampler(model=self.model, tokenizer=self.tokenizer, scheduler=self.scheduler)
         return plain.infill(inputs, config, **kwargs)
+
+
+# ---------------------------------------------------------------------------
+# LLaDA variant — same sampler, different config defaults
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class EntrgiLLaDASamplerConfig(EntrgiDreamSamplerConfig):
+    """EntrgiDreamSamplerConfig adapted for LLaDA.
+
+    Key differences from Dream:
+      - right_shift_logits = False  (LLaDA predicts bidirectionally)
+      - use_position_ids  = False   (LLaDA does not use explicit position IDs)
+    Everything else — M-step Adam guidance, entropy-weighted STE, confidence-based
+    remasking — is identical.
+    """
+
+    right_shift_logits: bool = False
+    use_position_ids: bool = False
+
+
+EntrgiLLaDASampler = EntrgiDreamSampler

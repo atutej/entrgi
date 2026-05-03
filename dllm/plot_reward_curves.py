@@ -1,4 +1,4 @@
-"""Pull reward curves from wandb and plot d1 vs EntRGi."""
+"""Pull reward curves from wandb and plot EntRGi vs APS vs diffu-GRPO."""
 
 import wandb
 import matplotlib.pyplot as plt
@@ -6,23 +6,28 @@ import pandas as pd
 import numpy as np
 
 ENTITY  = "atutej"
-PROJECT = "huggingface"
+PROJECT = "dream-rl"
 
 RUNS = {
-    "d1":     "cit1l0dj",
-    "EntRGi": "36i7oiud",
+    "EntRGi":     ["dream-entrgi-690949",     "dream-entrgitest-690738"],
+    "APS":        ["dream-aps-690729",         "dream-apstest-690834"],
+    "diffu-GRPO": ["dream-grpo-691024"],
 }
 
 EMA_SPAN = 20
 
 cividis    = plt.cm.cividis
-colors     = {"d1": cividis(0.15), "EntRGi": cividis(0.85)}
-linestyles = {"d1": "--",          "EntRGi": "-"}
-markers    = {"d1": "o",           "EntRGi": "^"}
+colors     = {"EntRGi": cividis(0.85), "APS": cividis(0.5), "diffu-GRPO": cividis(0.15)}
+linestyles = {"EntRGi": "-",           "APS": "-.",          "diffu-GRPO": "--"}
+markers    = {"EntRGi": "^",           "APS": "s",           "diffu-GRPO": "o"}
 
 
-def pull(api, run_id, keys, samples=10000):
-    run  = api.run(f"{ENTITY}/{PROJECT}/{run_id}")
+def pull(api, run_name, keys, samples=10000):
+    runs = api.runs(f"{ENTITY}/{PROJECT}", filters={"display_name": run_name})
+    runs = list(runs)
+    if not runs:
+        raise ValueError(f"Run not found: {run_name}")
+    run  = runs[0]
     hist = run.history(keys=["train/global_step"] + keys, samples=samples, pandas=True)
     hist = (hist.dropna(subset=["train/global_step"])
                 .sort_values("train/global_step")
@@ -34,114 +39,105 @@ def ema(y, span):
     return pd.Series(y).ewm(span=span, adjust=False).mean().values
 
 
+def interpolate_to_grid(steps, values, grid):
+    return np.interp(grid, steps, values)
+
+
 api = wandb.Api()
 
-# Pull all data upfront so we can do cross-run annotations
+# Pull and average across runs per method
 data = {}
-for label, run_id in RUNS.items():
-    hist = pull(api, run_id, ["train/reward", "_runtime"])
-    steps    = hist["train/global_step"].values
-    rewards  = hist["train/reward"].values
-    hours    = hist["_runtime"].values / 3600
-    smoothed = ema(rewards, EMA_SPAN)
-    # delta reward: subtract each run's own value at step 0
-    base     = smoothed[0]
-    data[label] = dict(steps=steps, rewards=rewards, hours=hours,
-                       smoothed=smoothed, base=base, delta=smoothed - base)
+for label, run_names in RUNS.items():
+    all_smoothed = []
+    all_hours    = []
+    step_grid    = None
 
-fig, axes = plt.subplots(1, 2, figsize=(9, 4.5))
+    for run_name in run_names:
+        hist     = pull(api, run_name, ["train/reward", "_runtime"])
+        steps    = hist["train/global_step"].values
+        rewards  = hist["train/reward"].values
+        hours    = hist["_runtime"].values / 3600
+        smoothed = ema(rewards, EMA_SPAN)
+
+        if step_grid is None:
+            step_grid = steps
+        all_smoothed.append(interpolate_to_grid(steps, smoothed, step_grid))
+        all_hours.append(interpolate_to_grid(steps, hours, step_grid))
+
+    smoothed_arr = np.stack(all_smoothed, axis=0)   # [n_runs, T]
+    hours_arr    = np.stack(all_hours,    axis=0)
+
+    mean_smoothed = smoothed_arr.mean(axis=0)
+    std_smoothed  = smoothed_arr.std(axis=0)
+    mean_hours    = hours_arr.mean(axis=0)
+
+    data[label] = dict(
+        steps        = step_grid,
+        mean         = mean_smoothed,
+        std          = std_smoothed,
+        hours        = mean_hours,
+        n            = len(run_names),
+    )
+
+# Transform: log(-reward) so linear axis looks like log scale, no matplotlib tricks
+for label in data:
+    data[label]["mean"] = np.log(-data[label]["mean"])
+
+# Tick positions in transformed space, labels show original reward values
+YTICK_VALS  = [0.5, 1, 2, 4]
+YTICKS      = [np.log(v) for v in YTICK_VALS]
+YTICKLABELS = [f"-{v}" for v in YTICK_VALS]
+
+fig, axes = plt.subplots(1, 2, figsize=(11, 4.2))
 plt.subplots_adjust(wspace=0.38, left=0.12, right=0.97, bottom=0.15, top=0.95)
 
-# ── left: Δreward vs step ────────────────────────────────────────────────────
+# ── left: reward vs step ─────────────────────────────────────────────────────
 ax = axes[0]
 for label in RUNS:
-    d = data[label]
-    ax.plot(d["steps"], d["delta"],
+    d  = data[label]
+    se = d["std"] / np.sqrt(d["n"])
+    ax.plot(d["steps"], d["mean"],
             color=colors[label], ls=linestyles[label], lw=3.5,
-            marker=markers[label], markevery=50, ms=10,
+            marker=markers[label], markevery=50, ms=8,
             label=label, zorder=10)
-    ax.fill_between(d["steps"], d["rewards"] - d["base"], d["delta"],
-                    color=colors[label], alpha=0.12, zorder=5)
+    ax.fill_between(d["steps"],
+                    d["mean"] - se, d["mean"] + se,
+                    color=colors[label], alpha=0.18, zorder=5)
 
-# Upward arrow at step 500 showing EntRGi improvement over d1
-d1_end     = data["d1"]["delta"][-1]
-entrgi_end = data["EntRGi"]["delta"][-1]
-ax.annotate(
-    "",
-    xy=(500, entrgi_end), xytext=(500, d1_end),
-    arrowprops=dict(arrowstyle="->", color="black", lw=2.0),
-    zorder=20,
-)
-ax.text(
-    396, (d1_end + entrgi_end) / 2 - 0.05,
-    f"+{entrgi_end - d1_end:.2f}",
-    va="center", ha="left", fontsize=13, color="black",
-)
-
+ax.invert_yaxis()
+ax.set_yticks(YTICKS)
+ax.set_yticklabels(YTICKLABELS)
 ax.grid(True, alpha=0.3, ls="-", lw=0.5)
 ax.set_xlabel("Training step", fontsize=18)
-ax.set_ylabel("Δ Reward", fontsize=18)
+ax.set_ylabel("Reward (log scale)", fontsize=18)
 ax.tick_params(axis="x", labelsize=16)
 ax.tick_params(axis="y", labelsize=16)
-ax.legend(loc="lower right", fontsize=13)
+ax.legend(loc="upper left", fontsize=13)
 
-# ── right: reward vs wall-clock time + speedup annotation ────────────────────
+# ── right: reward vs wall-clock time ─────────────────────────────────────────
 ax = axes[1]
 for label in RUNS:
-    d = data[label]
-    ax.plot(d["hours"], d["delta"],
+    d  = data[label]
+    se = d["std"] / np.sqrt(d["n"])
+    ax.plot(d["hours"], d["mean"],
             color=colors[label], ls=linestyles[label], lw=3.5,
-            marker=markers[label], markevery=50, ms=10,
+            marker=markers[label], markevery=50, ms=8,
             label=label, zorder=10)
-    ax.fill_between(d["hours"], d["rewards"] - d["base"], d["delta"],
-                    color=colors[label], alpha=0.12, zorder=5)
+    ax.fill_between(d["hours"],
+                    d["mean"] - se, d["mean"] + se,
+                    color=colors[label], alpha=0.18, zorder=5)
 
-# Speedup: d1 endpoint Δreward → find where EntRGi first reaches that level
-d1_final_delta    = data["d1"]["delta"][-1]
-d1_final_hour     = data["d1"]["hours"][-1]
-entrgi_hours      = data["EntRGi"]["hours"]
-entrgi_delta      = data["EntRGi"]["delta"]
-entrgi_final_delta = entrgi_delta[-1]
-
-# Interpolate to find exact hour where EntRGi crosses d1's final Δreward
-cross_idx = np.searchsorted(entrgi_delta, d1_final_delta)
-cross_idx = min(cross_idx, len(entrgi_delta) - 1)
-if cross_idx > 0 and entrgi_delta[cross_idx] != entrgi_delta[cross_idx - 1]:
-    frac = ((d1_final_delta - entrgi_delta[cross_idx - 1]) /
-            (entrgi_delta[cross_idx] - entrgi_delta[cross_idx - 1]))
-    entrgi_cross_hour = (entrgi_hours[cross_idx - 1]
-                         + frac * (entrgi_hours[cross_idx] - entrgi_hours[cross_idx - 1]))
-else:
-    entrgi_cross_hour = entrgi_hours[cross_idx]
-
-speedup = d1_final_hour / entrgi_cross_hour
-
-# Horizontal double-headed arrow just below EntRGi's final Δreward
-y_ann = entrgi_final_delta
-ax.annotate(
-    "",
-    xy=(entrgi_cross_hour, y_ann - 0.05), xytext=(d1_final_hour, y_ann - 0.05),
-    arrowprops=dict(arrowstyle="<->", color="black", lw=2.0),
-    zorder=20,
-)
-ax.text(
-    (entrgi_cross_hour + d1_final_hour) / 2, y_ann,
-    f"{speedup:.1f}× faster",
-    va="bottom", ha="center", fontsize=13, color="black",
-)
-# Dotted reference lines
-ax.axhline(d1_final_delta,    color="grey",             ls=":", lw=1.2, zorder=5)
-ax.axvline(entrgi_cross_hour, color=colors["EntRGi"],   ls=":", lw=1.2, zorder=5)
-ax.axvline(d1_final_hour,     color=colors["d1"],       ls=":", lw=1.2, zorder=5)
-
+ax.invert_yaxis()
+ax.set_yticks(YTICKS)
+ax.set_yticklabels(YTICKLABELS)
 ax.grid(True, alpha=0.3, ls="-", lw=0.5)
 ax.set_xlabel("Wall-clock time (h)", fontsize=18)
-ax.set_ylabel("Δ Reward", fontsize=18)
+ax.set_ylabel("Reward (log scale)", fontsize=18)
 ax.tick_params(axis="x", labelsize=16)
 ax.tick_params(axis="y", labelsize=16)
-ax.legend(loc="lower right", fontsize=13)
+ax.legend(loc="upper left", fontsize=13)
 
 plt.savefig("reward_curves.pdf", dpi=600, bbox_inches="tight")
 plt.savefig("reward_curves.png", dpi=150, bbox_inches="tight")
-print(f"Saved reward_curves.pdf / .png  (speedup = {speedup:.2f}×)")
+print("Saved reward_curves.pdf / .png")
 plt.show()

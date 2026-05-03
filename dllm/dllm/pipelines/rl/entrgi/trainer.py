@@ -92,6 +92,16 @@ class EntrgiOnlineSFTConfig(DiffuGRPOConfig):
             )
         },
     )
+    zero_unmatched_embeddings: bool = field(
+        default=False,
+        metadata={
+            "help": (
+                "If True, policy tokens with no match in the reward model vocabulary "
+                "get a zero embedding instead of the UNK embedding. "
+                "Recommended for LLaDA where vocab overlap with the reward model may be low."
+            )
+        },
+    )
 
 
 class EntrgiOnlineSFTTrainer(DreamGRPOTrainer):
@@ -171,7 +181,8 @@ class EntrgiOnlineSFTTrainer(DreamGRPOTrainer):
         # Now accelerator is ready — load guidance reward model on the right device.
         guidance_model_name = args.guidance_reward_model if args else "Skywork/Skywork-Reward-V2-Qwen3-0.6B"
         device = self.accelerator.device
-        self._load_guidance_model(guidance_model_name, device)
+        zero_unmatched = args.zero_unmatched_embeddings if args else False
+        self._load_guidance_model(guidance_model_name, device, zero_unmatched=zero_unmatched)
 
         # Replace placeholder with the real EntrgiDreamSampler.
         self.sampler = EntrgiDreamSampler(
@@ -183,8 +194,16 @@ class EntrgiOnlineSFTTrainer(DreamGRPOTrainer):
             mapped_embeds=self._guidance_mapped_embeds,
         )
 
-    def _load_guidance_model(self, model_name: str, device: torch.device):
-        """Load guidance reward model and precompute token mapping + embeddings."""
+    def _load_guidance_model(
+        self, model_name: str, device: torch.device, zero_unmatched: bool = False
+    ):
+        """Load guidance reward model and precompute token mapping + embeddings.
+
+        Args:
+            zero_unmatched: If True, unmatched policy tokens get a zero embedding
+                row instead of the reward model's UNK embedding. Use for LLaDA
+                where vocab overlap may be lower, to avoid spurious UNK gradients.
+        """
         reward_tokenizer = AutoTokenizer.from_pretrained(model_name)
         reward_model = AutoModelForSequenceClassification.from_pretrained(
             model_name, torch_dtype=torch.bfloat16, num_labels=1
@@ -193,20 +212,31 @@ class EntrgiOnlineSFTTrainer(DreamGRPOTrainer):
         for p in reward_model.parameters():
             p.requires_grad = False
 
-        # Token mapping: Dream vocab → reward-model embedding indices
-        dream_tokenizer = self.processing_class
-        dream_vocab = dream_tokenizer.get_vocab()
+        policy_vocab = self.processing_class.get_vocab()
         reward_vocab = reward_tokenizer.get_vocab()
         vocab_size = self.model.lm_head.out_features
-        unk_id = reward_tokenizer.unk_token_id or reward_tokenizer.eos_token_id
-
-        token_mapping = torch.full((vocab_size,), unk_id, dtype=torch.long, device=device)
-        for tok, did in dream_vocab.items():
-            if did < vocab_size and tok in reward_vocab:
-                token_mapping[did] = reward_vocab[tok]
-
         reward_embeds = reward_model.get_input_embeddings()
-        mapped_embeds = reward_embeds.weight[token_mapping].detach()
+
+        if zero_unmatched:
+            # Unmatched tokens → zero embedding (no gradient signal from unknown tokens)
+            embed_dim = reward_embeds.weight.shape[1]
+            mapped_embeds = torch.zeros(
+                vocab_size, embed_dim, dtype=reward_embeds.weight.dtype, device=device
+            )
+            token_mapping = torch.full((vocab_size,), -1, dtype=torch.long, device=device)
+            for tok, did in policy_vocab.items():
+                if did < vocab_size and tok in reward_vocab:
+                    token_mapping[did] = reward_vocab[tok]
+            matched = token_mapping >= 0
+            mapped_embeds[matched] = reward_embeds.weight[token_mapping[matched]].detach()
+        else:
+            # Unmatched tokens → UNK embedding (Dream default)
+            unk_id = reward_tokenizer.unk_token_id or reward_tokenizer.eos_token_id
+            token_mapping = torch.full((vocab_size,), unk_id, dtype=torch.long, device=device)
+            for tok, did in policy_vocab.items():
+                if did < vocab_size and tok in reward_vocab:
+                    token_mapping[did] = reward_vocab[tok]
+            mapped_embeds = reward_embeds.weight[token_mapping].detach()
 
         self._guidance_reward_model = reward_model
         self._guidance_reward_tokenizer = reward_tokenizer
