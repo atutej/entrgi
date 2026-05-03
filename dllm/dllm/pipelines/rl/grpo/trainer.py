@@ -50,6 +50,9 @@ class DiffuGRPOConfig(GRPOConfig):
     # Disable advantage std-normalization by default to match the diffu-GRPO reference
     # implementation (d1), which does not divide advantages by their std.
     scale_rewards: bool = False
+    # Required for LoRA + gradient checkpointing + DDP: prevents reducer hooks
+    # firing twice during the gradient-checkpoint recompute pass.
+    ddp_find_unused_parameters: bool = False
 
 
 class DiffuGRPOTrainer(GRPOTrainer):
