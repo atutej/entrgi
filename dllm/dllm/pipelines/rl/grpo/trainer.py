@@ -614,9 +614,12 @@ class DreamGRPOTrainer(DiffuGRPOTrainer):
             batch = input_ids[i : i + batch_size]
             batch_mask = attention_mask[i : i + batch_size]
 
-            # Dream requires explicit position IDs for correct RoPE with left-padding.
-            pos_id = batch_mask.long().cumsum(-1) - 1
-            pos_id = pos_id.masked_fill(batch_mask == 0, 1)
+            use_pos_ids = getattr(self.sampler_config, "use_position_ids", True)
+            if use_pos_ids:
+                pos_id = batch_mask.long().cumsum(-1) - 1
+                pos_id = pos_id.masked_fill(batch_mask == 0, 1)
+            else:
+                pos_id = None
 
             noised_input_ids = self._forward_process(
                 batch, prompt_index, mask_id, seed=seed
@@ -628,26 +631,25 @@ class DreamGRPOTrainer(DiffuGRPOTrainer):
                 )
                 un_batch = noised_input_ids.clone()
                 un_batch[prompt_index_expanded] = mask_id
+                fwd_kwargs = {"attention_mask": batch_mask.repeat(2, 1)}
+                if pos_id is not None:
+                    fwd_kwargs["position_ids"] = pos_id.repeat(2, 1)
                 logits, un_logits = torch.chunk(
-                    model(
-                        torch.cat([noised_input_ids, un_batch]),
-                        attention_mask=batch_mask.repeat(2, 1),
-                        position_ids=pos_id.repeat(2, 1),
-                    ).logits,
+                    model(torch.cat([noised_input_ids, un_batch]), **fwd_kwargs).logits,
                     2,
                     dim=0,
                 )
                 logits = un_logits + (cfg_scale + 1) * (logits - un_logits)
             else:
-                logits = model(
-                    noised_input_ids,
-                    attention_mask=batch_mask,
-                    position_ids=pos_id,
-                ).logits
+                fwd_kwargs = {"attention_mask": batch_mask}
+                if pos_id is not None:
+                    fwd_kwargs["position_ids"] = pos_id
+                logits = model(noised_input_ids, **fwd_kwargs).logits
 
-            # Right-shift: raw logits[:, i] predicts token i+1 in Dream's AR convention.
-            # After shift, logits[:, i] predicts token i, matching completion_targets.
-            logits = torch.cat([logits[:, :1], logits[:, :-1]], dim=1)
+            if getattr(self.sampler_config, "right_shift_logits", True):
+                # Right-shift: raw logits[:, i] predicts token i+1 in Dream's AR convention.
+                # After shift, logits[:, i] predicts token i, matching completion_targets.
+                logits = torch.cat([logits[:, :1], logits[:, :-1]], dim=1)
 
             completion_logits = logits[:, -logits_to_keep:, :]
             completion_targets = batch[:, -logits_to_keep:]

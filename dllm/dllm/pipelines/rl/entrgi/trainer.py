@@ -495,11 +495,16 @@ class EntrgiOnlineSFTTrainer(DreamGRPOTrainer):
         noised_ids = input_ids.clone()
         noised_ids[:, prompt_length:][noise_mask] = mask_id
 
-        pos_id = attention_mask.long().cumsum(-1) - 1
-        pos_id = pos_id.masked_fill(attention_mask == 0, 1)
+        use_pos_ids = getattr(self.sampler_config, "use_position_ids", True)
+        if use_pos_ids:
+            pos_id = attention_mask.long().cumsum(-1) - 1
+            pos_id = pos_id.masked_fill(attention_mask == 0, 1)
+            logits = model(noised_ids, attention_mask=attention_mask, position_ids=pos_id).logits
+        else:
+            logits = model(noised_ids, attention_mask=attention_mask).logits
 
-        logits = model(noised_ids, attention_mask=attention_mask, position_ids=pos_id).logits
-        logits = torch.cat([logits[:, :1], logits[:, :-1]], dim=1)  # right-shift
+        if getattr(self.sampler_config, "right_shift_logits", True):
+            logits = torch.cat([logits[:, :1], logits[:, :-1]], dim=1)  # right-shift
 
         completion_logits = logits[:, -logits_to_keep:, :]
         completion_targets = input_ids[:, -logits_to_keep:]
