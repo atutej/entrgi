@@ -83,6 +83,16 @@ class TrainingArguments(DiffuGRPOConfig):
     )
     dream_top_p: float = field(default=0.95, metadata={"help": "top-p for Dream token sampling."})
     dream_top_k: int = field(default=50, metadata={"help": "top-k for Dream token sampling."})
+    reward_model: Optional[str] = field(
+        default=None,
+        metadata={
+            "help": (
+                "Reward model for scoring completions. "
+                "Only applies to open-ended datasets (wildchat). "
+                "Defaults to Skywork/Skywork-Reward-V2-Qwen3-1.7B when unset."
+            )
+        },
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -98,7 +108,10 @@ def train():
         model_config.model_name_or_path = "Dream-org/Dream-v0-Instruct-7B"
 
     # ---- Dataset & rewards ------------------------------------------------------
-    dataset, reward_functions = get_dataset_and_rewards(training_args.dataset)
+    dataset, reward_functions = get_dataset_and_rewards(
+        training_args.dataset,
+        reward_model=training_args.reward_model,
+    )
 
     if training_args.verbose_reward:
         reward_functions = [partial(fn, verbose=True) for fn in reward_functions]
