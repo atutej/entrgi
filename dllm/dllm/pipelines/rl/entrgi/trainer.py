@@ -214,7 +214,10 @@ class EntrgiOnlineSFTTrainer(DreamGRPOTrainer):
 
         policy_vocab = self.processing_class.get_vocab()
         reward_vocab = reward_tokenizer.get_vocab()
-        vocab_size = self.model.lm_head.out_features
+        try:
+            vocab_size = self.model.lm_head.out_features
+        except AttributeError:
+            vocab_size = self.model.config.vocab_size
         reward_embeds = reward_model.get_input_embeddings()
 
         if zero_unmatched:
