@@ -567,6 +567,24 @@ class DiffuGRPOTrainer(GRPOTrainer):
     # Override: skip shuffle to keep set_seed+rand masks reproducible across old/ref/current forwards
     # -----------------------------------------------------------------------
 
+    @profiling_decorator
+    def _prepare_inputs(self, generation_batch):
+        mode = "train" if self.model.training else "eval"
+        if mode == "train":
+            generate_every = self.args.steps_per_generation * self.num_iterations
+            if self._step % generate_every == 0 or self._buffered_inputs is None:
+                generation_batch = self._generate_and_score_completions(generation_batch)
+                # Do NOT call shuffle_sequence_dict (unlike TRL default): diffusion masks are
+                # position-dependent (set_seed + torch.rand(batch.shape)), so shuffling sequences
+                # would cause ref/old masks to mismatch current-step masks → KL explosion.
+                self._buffered_inputs = split_tensor_dict(generation_batch, self.args.steps_per_generation)
+            inputs = self._buffered_inputs[self._step % self.args.steps_per_generation]
+            self._step += 1
+        else:
+            inputs = self._generate_and_score_completions(generation_batch)
+        return inputs
+
+
 # ---------------------------------------------------------------------------
 # Dream-specific subclass
 # ---------------------------------------------------------------------------
