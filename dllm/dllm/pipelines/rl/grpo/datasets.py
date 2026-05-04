@@ -170,6 +170,21 @@ def get_code_questions(split="train") -> Dataset:
     )
 
 
+def get_magpie_ultra_questions(
+    num_prompts: int = 20000,
+    seed: int = 42,
+    min_quality: str = "good",
+) -> Dataset:
+    quality_order = {"very poor": 0, "poor": 1, "average": 2, "good": 3, "excellent": 4}
+    min_q = quality_order[min_quality]
+    data = load_dataset("argilla/magpie-ultra-v0.1", split="train")
+    data = data.filter(lambda x: quality_order.get(x["quality"], 0) >= min_q)
+    data = data.shuffle(seed=seed)
+    if num_prompts > 0:
+        data = data.select(range(min(num_prompts, len(data))))
+    return data.map(lambda x: {"prompt": [{"role": "user", "content": x["instruction"]}]})
+
+
 def get_wildchat_questions(
     num_prompts: int = 20000,
     seed: int = 42,
@@ -214,7 +229,7 @@ def get_wildchat_questions(
 # Unified entry point
 # ---------------------------------------------------------------------------
 
-SUPPORTED_DATASETS = ("gsm8k", "countdown", "sudoku", "math", "code", "wildchat")
+SUPPORTED_DATASETS = ("gsm8k", "countdown", "sudoku", "math", "code", "wildchat", "magpie")
 
 
 def get_dataset_and_rewards(
@@ -261,6 +276,13 @@ def get_dataset_and_rewards(
         reward_functions = [xmlcount_reward_func, coding_reward_func]
     elif dataset_name == "wildchat":
         dataset = get_wildchat_questions()
+        reward_functions = [
+            make_skywork_reward_func(reward_model)
+            if reward_model is not None
+            else make_skywork_reward_func()
+        ]
+    elif dataset_name == "magpie":
+        dataset = get_magpie_ultra_questions()
         reward_functions = [
             make_skywork_reward_func(reward_model)
             if reward_model is not None
