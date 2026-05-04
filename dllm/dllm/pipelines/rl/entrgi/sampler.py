@@ -412,9 +412,9 @@ class EntrgiDreamSampler(BaseSampler):
 
             with torch.no_grad():
                 if pos_id is not None:
-                    logits = self.model(x, attention_mask=attention_mask.bool(), position_ids=pos_id).logits
+                    logits = self.model(x, attention_mask=attention_mask[:, None, None, :].bool(), position_ids=pos_id).logits
                 else:
-                    logits = self.model(x, attention_mask=attention_mask.bool()).logits
+                    logits = self.model(x, attention_mask=attention_mask[:, None, None, :].bool()).logits
                 if right_shift_logits:
                     logits = torch.cat([logits[:, :1], logits[:, :-1]], dim=1)
 
