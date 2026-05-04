@@ -495,7 +495,7 @@ class EntrgiOnlineSFTTrainer(DreamGRPOTrainer):
         noised_ids = input_ids.clone()
         noised_ids[:, prompt_length:][noise_mask] = mask_id
 
-        bool_mask = attention_mask.bool()
+        bool_mask = attention_mask[:, None, None, :].bool()
         use_pos_ids = getattr(self.sampler_config, "use_position_ids", True)
         if use_pos_ids:
             pos_id = attention_mask.long().cumsum(-1) - 1

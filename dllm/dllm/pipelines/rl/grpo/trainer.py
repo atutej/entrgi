@@ -643,8 +643,8 @@ class DreamGRPOTrainer(DiffuGRPOTrainer):
                 batch, prompt_index, mask_id, seed=seed
             )
 
-            # Dream's SDPA requires bool or float mask, not long/int.
-            bool_mask = batch_mask.bool()
+            # Dream's SDPA requires a [B, 1, 1, T] bool mask; 2D long/int is rejected.
+            bool_mask = batch_mask[:, None, None, :].bool()
             if cfg_scale > 0.0:
                 prompt_index_expanded = prompt_index.unsqueeze(0).repeat(
                     noised_input_ids.shape[0], 1
