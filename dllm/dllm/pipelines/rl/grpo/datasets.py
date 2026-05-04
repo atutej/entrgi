@@ -182,7 +182,10 @@ def get_magpie_ultra_questions(
     data = data.shuffle(seed=seed)
     if num_prompts > 0:
         data = data.select(range(min(num_prompts, len(data))))
-    return data.map(lambda x: {"prompt": [{"role": "user", "content": x["instruction"]}]})
+    return data.map(
+        lambda x: {"prompt": [{"role": "user", "content": x["instruction"]}]},
+        remove_columns=data.column_names,
+    )
 
 
 def get_wildchat_questions(
