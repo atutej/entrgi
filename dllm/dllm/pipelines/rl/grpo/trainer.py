@@ -643,13 +643,15 @@ class DreamGRPOTrainer(DiffuGRPOTrainer):
                 batch, prompt_index, mask_id, seed=seed
             )
 
+            # Dream's SDPA requires bool or float mask, not long/int.
+            bool_mask = batch_mask.bool()
             if cfg_scale > 0.0:
                 prompt_index_expanded = prompt_index.unsqueeze(0).repeat(
                     noised_input_ids.shape[0], 1
                 )
                 un_batch = noised_input_ids.clone()
                 un_batch[prompt_index_expanded] = mask_id
-                fwd_kwargs = {"attention_mask": batch_mask.repeat(2, 1)}
+                fwd_kwargs = {"attention_mask": bool_mask.repeat(2, 1)}
                 if pos_id is not None:
                     fwd_kwargs["position_ids"] = pos_id.repeat(2, 1)
                 logits, un_logits = torch.chunk(
@@ -659,7 +661,7 @@ class DreamGRPOTrainer(DiffuGRPOTrainer):
                 )
                 logits = un_logits + (cfg_scale + 1) * (logits - un_logits)
             else:
-                fwd_kwargs = {"attention_mask": batch_mask}
+                fwd_kwargs = {"attention_mask": bool_mask}
                 if pos_id is not None:
                     fwd_kwargs["position_ids"] = pos_id
                 logits = model(noised_input_ids, **fwd_kwargs).logits
