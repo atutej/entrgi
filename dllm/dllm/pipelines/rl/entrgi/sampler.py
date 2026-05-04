@@ -298,7 +298,7 @@ class EntrgiDreamSampler(BaseSampler):
                         eos_found = True
 
             rewards = self.reward_model(
-                inputs_embeds=full_embeds, attention_mask=attn_mask
+                inputs_embeds=full_embeds, attention_mask=attn_mask.bool()
             ).logits[:, 0]
             loss = -rewards.sum() / config.reward_temperature
             loss.backward()
@@ -412,9 +412,9 @@ class EntrgiDreamSampler(BaseSampler):
 
             with torch.no_grad():
                 if pos_id is not None:
-                    logits = self.model(x, attention_mask=attention_mask, position_ids=pos_id).logits
+                    logits = self.model(x, attention_mask=attention_mask.bool(), position_ids=pos_id).logits
                 else:
-                    logits = self.model(x, attention_mask=attention_mask).logits
+                    logits = self.model(x, attention_mask=attention_mask.bool()).logits
                 if right_shift_logits:
                     logits = torch.cat([logits[:, :1], logits[:, :-1]], dim=1)
 
