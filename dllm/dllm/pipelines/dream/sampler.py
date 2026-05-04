@@ -176,11 +176,11 @@ class DreamSampler(BaseSampler):
                 pos_id_cfg = (
                     torch.cat([pos_id, pos_id], dim=0) if pos_id is not None else None
                 )
-                logits = self.model(x_, attention_mask_cfg, pos_id_cfg).logits
+                logits = self.model(x_, attention_mask_cfg.bool(), pos_id_cfg).logits
                 logits, un_logits = torch.chunk(logits, 2, dim=0)
                 logits = un_logits + (cfg_scale + 1) * (logits - un_logits)
             else:
-                logits = self.model(x, attention_mask, pos_id).logits
+                logits = self.model(x, attention_mask.bool(), pos_id).logits
 
             if right_shift_logits:
                 logits = torch.cat([logits[:, :1], logits[:, :-1]], dim=1)
@@ -374,7 +374,7 @@ class DreamSampler(BaseSampler):
             mask_index = x == mask_token_id
 
             # Forward pass, then AR-shift to predict token at position i+1
-            logits = self.model(x, attention_mask, pos_id).logits
+            logits = self.model(x, attention_mask.bool(), pos_id).logits
             if right_shift_logits:
                 logits = torch.cat([logits[:, :1], logits[:, :-1]], dim=1)
 
