@@ -188,6 +188,21 @@ def get_magpie_ultra_questions(
     )
 
 
+def get_lmsys_questions(
+    num_prompts: int = 20000,
+    seed: int = 42,
+) -> Dataset:
+    data = load_dataset("lmsys/lmsys-chat-1m", split="train")
+    data = data.filter(lambda x: x["language"] == "English")
+    data = data.shuffle(seed=seed)
+    if num_prompts > 0:
+        data = data.select(range(min(num_prompts, len(data))))
+    return data.map(
+        lambda x: {"prompt": [{"role": "user", "content": x["conversation"][0]["content"]}]},
+        remove_columns=data.column_names,
+    )
+
+
 def get_wildchat_questions(
     num_prompts: int = 20000,
     seed: int = 42,
@@ -232,7 +247,7 @@ def get_wildchat_questions(
 # Unified entry point
 # ---------------------------------------------------------------------------
 
-SUPPORTED_DATASETS = ("gsm8k", "countdown", "sudoku", "math", "code", "wildchat", "magpie")
+SUPPORTED_DATASETS = ("gsm8k", "countdown", "sudoku", "math", "code", "wildchat", "magpie", "lmsys")
 
 
 def get_dataset_and_rewards(
@@ -286,6 +301,13 @@ def get_dataset_and_rewards(
         ]
     elif dataset_name == "magpie":
         dataset = get_magpie_ultra_questions()
+        reward_functions = [
+            make_skywork_reward_func(reward_model)
+            if reward_model is not None
+            else make_skywork_reward_func()
+        ]
+    elif dataset_name == "lmsys":
+        dataset = get_lmsys_questions()
         reward_functions = [
             make_skywork_reward_func(reward_model)
             if reward_model is not None
